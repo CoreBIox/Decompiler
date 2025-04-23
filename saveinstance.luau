@@ -1,6 +1,7 @@
 --!native
 --!optimize 2
 --!divine-intellect
+-- https://discord.gg/wx4ThpAsmw
 
 local function string_find(s, pattern)
 	return string.find(s, pattern, nil, true)
@@ -495,7 +496,7 @@ Binary_Descriptors = {
             buffer.writef32(buf, 12, unpack(raw:GetComponents(), 4, 12))
         end
         return buf
-    end
+    end,
 	["EnumItem"] = function(raw)
 		local b_Name, Name_size = Binary_Descriptors.string(tostring(raw.EnumType))
 

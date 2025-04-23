@@ -481,22 +481,23 @@ Binary_Descriptors = {
 
 		return b, 6
 	end,
-    ["CFrame"] = function(raw)
-        local X, Y, Z = raw.X, raw.Y, raw.Z
-        local rotID = CFrame_Rotation_IDs[raw:GetRotationID()]
-        
-        local buf = buffer.create(rotID and 13 or 49)
-        buffer.writef32(buf, 0, X)
-        buffer.writef32(buf, 4, Y)
-        buffer.writef32(buf, 8, Z)
-        
-        if rotID then
-            buffer.writeu8(buf, 12, rotID)
-        else
-            buffer.writef32(buf, 12, unpack(raw:GetComponents(), 4, 12))
-        end
-        return buf
-    end,
+	["CFrame"] = function(raw)
+		local X, Y, Z = raw.X, raw.Y, raw.Z
+		local rotID = CFrame_Rotation_IDs[raw:GetRotationID()]
+		
+		local buf = buffer.create(rotID and 13 or 49)
+		buffer.writef32(buf, 0, X)
+		buffer.writef32(buf, 4, Y)
+		buffer.writef32(buf, 8, Z)
+		
+		if rotID then
+			buffer.writeu8(buf, 12, rotID)
+		else
+			local components = {raw:GetComponents()} -- Create a table of components
+			buffer.writef32(buf, 12, unpack(components, 4, 12)) -- Correct unpack
+		end
+		return buf
+	end,
 	["EnumItem"] = function(raw)
 		local b_Name, Name_size = Binary_Descriptors.string(tostring(raw.EnumType))
 

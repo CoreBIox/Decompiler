@@ -8,27 +8,25 @@ local function string_find(s, pattern)
 end
 
 local function ArrayToDict(t, hydridMode, valueOverride, typeStrict)
-	local tmp = {}
-
-	if hydridMode then
-		for any1, any2 in t do
-			if type(any1) == "number" then
-				tmp[any2] = valueOverride or true
-			elseif type(any2) == "table" then
-				tmp[any1] = ArrayToDict(any2, hydridMode) -- any1 is Class, any2 is Name
-			else
-				tmp[any1] = any2
-			end
-		end
-	else
-		for _, key in t do
-			if not typeStrict or typeStrict and type(key) == typeStrict then
-				tmp[key] = true
-			end
-		end
-	end
-
-	return tmp
+    local tmp = {}
+    local processor = hydridMode 
+        and function(k, v) -- Hybrid mode handler
+            if type(k) == "number" then
+                tmp[v] = valueOverride or true
+            elseif type(v) == "table" then
+                tmp[k] = ArrayToDict(v, hydridMode)
+            else
+                tmp[k] = v
+            end
+        end
+        or function(_, v) -- Normal mode
+            if not typeStrict or type(v) == typeStrict then
+                tmp[v] = true
+            end
+        end
+    
+    for k, v in pairs(t) do processor(k, v) end
+    return tmp
 end
 
 local global_container
@@ -75,21 +73,14 @@ local base64encode = global_container.base64encode
 local sha384
 
 local service = setmetatable({}, {
-	__index = function(self, serviceName)
-		local o, s = pcall(Instance.new, serviceName)
-		local Service = o and s
-			or game:GetService(serviceName)
-			or settings():GetService(serviceName)
-			or UserSettings():GetService(serviceName)
-
-		-- if cloneref then
-		-- 	Service = cloneref(Service)
-		-- end
-		if Service then
-		self[serviceName] = Service
-		end
-		return Service
-	end,
+    __index = function(self, serviceName)
+        local instance = pcall(Instance.new, serviceName) and Instance.new(serviceName)
+            or pcall(game.GetService, game, serviceName) and game:GetService(serviceName)
+            or nil
+        
+        if instance then rawset(self, serviceName, instance) end
+        return instance
+    end
 })
 
 local gethiddenproperty_fallback
@@ -490,48 +481,22 @@ Binary_Descriptors = {
 
 		return b, 6
 	end,
-	["CFrame"] = function(raw)
-		local X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = raw:GetComponents()
-
-		local rotation_ID = CFrame_Rotation_IDs[string.pack("<fffffffff", R00, R01, R02, R10, R11, R12, R20, R21, R22)]
-
-		local len = rotation_ID and 13 or 49
-		local b = buffer.create(len)
-
-		-- ? TODO cleaner but slower ?
-		-- local write_vector3 = Descriptors.Vector3
-		-- local pos = write_vector3(raw.Position)
-		-- buffer.copy(b, 0, pos)
-
-		buffer.writef32(b, 0, X)
-		buffer.writef32(b, 4, Y)
-		buffer.writef32(b, 8, Z)
-
-		if rotation_ID then
-			buffer.writeu8(b, 12, rotation_ID)
-		else
-			buffer.writeu8(b, 12, 0x0)
-
-			-- ? TODO cleaner but slower ?
-			-- buffer.copy(b, 13, write_vector3(raw.XVector)) -- R00, R10, R20
-			-- buffer.copy(b, 13 + 12, write_vector3(raw.YVector)) -- R01, R11, R21
-			-- buffer.copy(b, 13 + 24, write_vector3(raw.ZVector)) -- R02, R12, R22
-
-			buffer.writef32(b, 13, R00)
-			buffer.writef32(b, 17, R01)
-			buffer.writef32(b, 21, R02)
-
-			buffer.writef32(b, 25, R10)
-			buffer.writef32(b, 29, R11)
-			buffer.writef32(b, 33, R12)
-
-			buffer.writef32(b, 37, R20)
-			buffer.writef32(b, 41, R21)
-			buffer.writef32(b, 45, R22)
-		end
-
-		return b, len
-	end,
+    ["CFrame"] = function(raw)
+        local X, Y, Z = raw.X, raw.Y, raw.Z
+        local rotID = CFrame_Rotation_IDs[raw:GetRotationID()]
+        
+        local buf = buffer.create(rotID and 13 or 49)
+        buffer.writef32(buf, 0, X)
+        buffer.writef32(buf, 4, Y)
+        buffer.writef32(buf, 8, Z)
+        
+        if rotID then
+            buffer.writeu8(buf, 12, rotID)
+        else
+            buffer.writef32(buf, 12, unpack(raw:GetComponents(), 4, 12))
+        end
+        return buf
+    end
 	["EnumItem"] = function(raw)
 		local b_Name, Name_size = Binary_Descriptors.string(tostring(raw.EnumType))
 
@@ -679,25 +644,16 @@ for rangeStart, rangeEnd in string.gmatch(ESCAPES_PATTERN, "(.)%-(.)") do
 	end
 end
 
-local XML_Descriptors
-XML_Descriptors = {
-	__CDATA = function(raw) -- ? Normally Roblox doesn't use CDATA unless the string has newline characters (\n); We rather CDATA everything for sake of speed
-		return "<![CDATA[" .. raw .. "]]>"
-	end,
-	__ENUM = function(raw)
-		return raw.Value, "token"
-	end,
-	__NORMALIZE_NUMBER = function(raw)
-		if raw ~= raw then
-			return "NAN"
-		elseif raw == math.huge then
-			return "INF"
-		elseif raw == -math.huge then
-			return "-INF"
-		end
+local XML_ESCAPES = {
+    [38] = "&amp;", [60] = "&lt;", [62] = "&gt;",
+    [34] = "&quot;", [39] = "&apos;"
+}
 
-		return raw
-	end,
+local function xmlEscape(s)
+    return s:gsub("[\0-\31\127-\255&<>\"']", function(c)
+        return XML_ESCAPES[c:byte()] or ("&#%d;"):format(c:byte())
+    end)
+end
 	__NORMALIZE_RANGE = function(raw)
 		return raw ~= raw and "0" or raw -- Normally we should return "-nan(ind)" instead of "0" but this adds more compatibility
 	end,
@@ -2282,70 +2238,39 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 
 		-- end
 
-		if OPTIONS.noscripts then
-			ldecompile = function()
-				return "-- Decompiling is disabled"
-			end
-		elseif Decompiler then
-			local decomp = construct_TimeoutHandler(Timeout, Decompiler, "Decompiler timed out")
-
-			ldecompile = function(script)
-				-- local name = scr.ClassName .. scr.Name
-				local hashed_bytecode
-				if ScriptCache then
-					local s, bytecode = getbytecode(script)
-					local cached
-
-					if s then
-						if not bytecode or bytecode == "" then
-							return "-- The Script is Empty"
-						end
-						hashed_bytecode = sha384(bytecode)
-						cached = ldeccache[hashed_bytecode]
-					end
-
-					if cached then
-						if __DEBUG_MODE then
-							__DEBUG_MODE("Found in Cache", script:GetFullName())
-						end
-						return cached
-					end
-				else
-					if DecompileJobless then
-						return "-- Not found in already decompiled ScriptCache"
-					end
-
-					task.wait() -- TODO Maybe remove?
-				end
-
-				local ok, result = run_with_loading("Decompiling " .. script.Name, true, nil, decomp, script)
-				if not result then
-					ok, result = false, "Empty Output"
-				end
-
-				local output
-				if ok then
-					result = string.gsub(result, "\0", "\\0") -- ? Some decompilers sadly output \0 which prevents files from opening
-					output = result
-				else
-					output = "--[[ Failed to decompile. Reason:\n" .. (result or "") .. "\n]]"
-				end
-
-				if ScriptCache and hashed_bytecode then -- TODO there might(?) be an edgecase where it manages to decompile (built-in) even though getscriptbytecode failed, and the output won't get cached
-					ldeccache[hashed_bytecode] = output -- ? Should we cache even if it timed out?
-					if __DEBUG_MODE then
-						__DEBUG_MODE("Cached", script:GetFullName())
-					end
-				end
-
-				return output
-			end
-		else
-			ldecompile = function()
+		if type(decompile) ~= "function" then
+			decompile = function()
 				return "-- Your Executor does NOT have a Decompiler"
 			end
 		end
-	end
+		
+		local DECOMP_CACHE = {}
+		
+		local function decompileScript(script)
+			if OPTIONS.noscripts then
+				return "-- Disabled"
+			end
+		
+			local bytecode = getscriptbytecode(script)
+			local hash = bytecode and sha384(bytecode)
+		
+			if hash and DECOMP_CACHE[hash] then
+				return DECOMP_CACHE[hash] .. (SaveBytecode and bytecodeHeader(bytecode) or "")
+			end
+		
+			local ok, result = run_with_loading(
+				"Decompiling",
+				construct_TimeoutHandler(Timeout, decompile)
+			)
+		
+			local output = ok and processDecompiled(result) or errorMsg(result)
+			if hash then
+				DECOMP_CACHE[hash] = output
+			end
+		
+			return output
+		end
+		
 
 	local function GetLocalPlayer()
 		return service.Players.LocalPlayer
@@ -2500,24 +2425,25 @@ local function synsaveinstance(CustomOptions, CustomOptions2)
 		return prop_list
 	end
 
-	local CHUNK_LIMIT = 200 * 1024 * 1024 -- string length overflow prevention
-	local function save_cache(final)
-		local savestr = table.concat(savebuffer)
-		currentstr ..= savestr -- TODO: Causes "not enough memory" error on some exec
-
-		-- writefile(placename, totalstr)
-		-- appendfile(placename, savestr) -- * supposedly causes uneven amount of Tags (e.g. <Item> must be closed with </Item> but sometimes there's more of one than the other). While being under load, the function produces unexpected output?
-		local savestr_len = #savestr
-		totalsize += savestr_len
-		currentsize += savestr_len
-
-		table.clear(savebuffer)
-		savebuffer_size = 1
-
-		if CHUNK_LIMIT < currentsize or final then
-			table.insert(chunks, { size = currentsize, str = currentstr })
-			currentstr, currentsize = "", 0
+	local CHUNK_SIZE = 1024 * 1024 -- 1MB chunks
+	local chunkPool = {}
+	
+	local function getChunk()
+		return table.remove(chunkPool) or buffer.create(CHUNK_SIZE)
+	end
+	
+	local function saveChunk(final)
+		local chunk = table.concat(saveBuffer)
+		currentSize += #chunk
+		table.insert(chunks, chunk)
+		table.clear(saveBuffer)
+		
+		if currentSize > CHUNK_SIZE or final then
+			writeFile(table.concat(chunks))
+			table.clear(chunks)
+			currentSize = 0
 		end
+	end
 
 		if StatusText then
 			StatusText.Text = "Saving.. Size: " .. get_size_format()

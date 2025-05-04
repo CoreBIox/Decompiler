@@ -307,36 +307,32 @@ local CFrame_Rotation_IDs = {
 	["\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\191\0\0\0\0\0\0\0\0"] = 0x22,
 	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\191\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\128"] = 0x23,
 }
-local Binary_Descriptors
-Binary_Descriptors = {
-	__SEQUENCE = function(raw, valueFormatter, keypointSize, Envelope)
-		local Keypoints = raw.Keypoints
-		local Keypoints_n = #Keypoints
+["ColorSequence"] = function(raw)
+    local Keypoints = raw.Keypoints
+    local Keypoints_n = #Keypoints
 
-		local len = 4 + (keypointSize or 12) * Keypoints_n
-		local b = buffer.create(len)
-		local offset = 0
+    local len = 4 + (16 * Keypoints_n) -- 4 bytes for count, 16 bytes per keypoint (Time:4, Color3:12)
+    local b = buffer.create(len)
+    local offset = 0
 
-		buffer.writeu32(b, offset, Keypoints_n)
-		offset += 4
+    buffer.writeu32(b, offset, Keypoints_n)
+    offset += 4
 
-		for _, keypoint in Keypoints do
-			buffer.writef32(b, offset, Envelope or keypoint.Envelope)
-			offset += 4
-			buffer.writef32(b, offset, keypoint.Time)
-			offset += 4
+    for _, keypoint in Keypoints do
+        buffer.writef32(b, offset, keypoint.Time)
+        offset += 4
 
-			local Value = keypoint.Value
-			if valueFormatter then
-				offset += valueFormatter(Value, b, offset)
-			else
-				buffer.writef32(b, offset, Value)
-				offset += 4
-			end
-		end
+        local color3 = keypoint.Value
+        buffer.writef32(b, offset, color3.R)
+        offset += 4
+        buffer.writef32(b, offset, color3.G)
+        offset += 4
+        buffer.writef32(b, offset, color3.B)
+        offset += 4
+    end
 
-		return b, len
-	end,
+    return b, len
+end,
 	["string"] = function(raw)
 		local raw_len = #raw
 		local len = 4 + raw_len

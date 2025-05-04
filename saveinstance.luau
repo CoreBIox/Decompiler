@@ -307,28 +307,28 @@ local CFrame_Rotation_IDs = {
 	["\0\0\0\0\0\0\128\191\0\0\0\0\0\0\0\0\0\0\0\0\0\0\128\63\0\0\128\191\0\0\0\0\0\0\0\0"] = 0x22,
 	["\0\0\0\0\0\0\0\0\0\0\128\191\0\0\0\0\0\0\128\191\0\0\0\128\0\0\128\191\0\0\0\0\0\0\0\128"] = 0x23,
 }
-["ColorSequence"] = function(raw)
-    local Keypoints = raw.Keypoints
-    local Keypoints_n = #Keypoints
+Binary_Descriptors.ColorSequence = function(raw)
+    local Keypoints    = raw.Keypoints
+    local Keypoints_n  = #Keypoints
 
-    local len = 4 + (16 * Keypoints_n) -- 4 bytes for count, 16 bytes per keypoint (Time:4, Color3:12)
-    local b = buffer.create(len)
+    local len    = 4 + 16 * Keypoints_n
+    local b      = buffer.create(len)
     local offset = 0
 
     buffer.writeu32(b, offset, Keypoints_n)
-    offset += 4
+    offset = offset + 4
 
-    for _, keypoint in Keypoints do
+    for _, keypoint in ipairs(Keypoints) do
         buffer.writef32(b, offset, keypoint.Time)
-        offset += 4
+        offset = offset + 4
 
-        local color3 = keypoint.Value
-        buffer.writef32(b, offset, color3.R)
-        offset += 4
-        buffer.writef32(b, offset, color3.G)
-        offset += 4
-        buffer.writef32(b, offset, color3.B)
-        offset += 4
+        local c = keypoint.Value
+        buffer.writef32(b, offset, c.R)
+        offset = offset + 4
+        buffer.writef32(b, offset, c.G)
+        offset = offset + 4
+        buffer.writef32(b, offset, c.B)
+        offset = offset + 4
     end
 
     return b, len
